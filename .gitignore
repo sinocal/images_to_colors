@@ -1,0 +1,7 @@
+*.rar
+*.csv
+
+# ignore all images
+*.png
+*.jpg
+*.jpeg
