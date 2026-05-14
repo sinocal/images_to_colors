@@ -7,3 +7,8 @@
 *.jpeg
 
 api_sk.txt
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
