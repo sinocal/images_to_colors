@@ -359,19 +359,19 @@ def suavizar_bordes(mapa_regiones, df_regiones, kernel_size=3, aplicar_morfologi
         df_actualizado: DataFrame actualizado
         stats: estadísticas del proceso
     """
-    print(f"\n{'='*70}")
-    print(f"SUAVIZANDO BORDES (kernel size: {kernel_size})")
-    print(f"{'='*70}\n")
+    # print(f"\n{'='*70}")
+    # print(f"SUAVIZANDO BORDES (kernel size: {kernel_size})")
+    # print(f"{'='*70}\n")
     
     h, w = mapa_regiones.shape
     
     # Paso 1: Aplicar median filter
-    print("Aplicando filtro de mediana...")
+    # print("Aplicando filtro de mediana...")
     mapa_suavizado = median_filter(mapa_regiones, size=kernel_size)
     
     # Paso 2: Operaciones morfológicas por región (opcional pero recomendado)
     if aplicar_morfologia:
-        print("Aplicando operaciones morfológicas para limpiar artefactos...")
+        # print("Aplicando operaciones morfológicas para limpiar artefactos...")
         
         mapa_morfologico = np.zeros_like(mapa_suavizado)
         
@@ -396,10 +396,10 @@ def suavizar_bordes(mapa_regiones, df_regiones, kernel_size=3, aplicar_morfologi
             mapa_morfologico[mascara_rellena] = region_id
         
         mapa_suavizado = mapa_morfologico
-        print(f"  ✓ {len(regiones_unicas)} regiones procesadas")
+        # print(f"  ✓ {len(regiones_unicas)} regiones procesadas")
     
     # Paso 3: Re-etiquetar regiones (por si alguna se fragmentó)
-    print("\nRe-etiquetando regiones...")
+    # print("\nRe-etiquetando regiones...")
     mapa_final = np.zeros_like(mapa_suavizado)
     nuevas_regiones = []
     nuevo_id = 1
@@ -453,21 +453,21 @@ def suavizar_bordes(mapa_regiones, df_regiones, kernel_size=3, aplicar_morfologi
         'morfologia': aplicar_morfologia
     }
     
-    print(f"\n{'='*70}")
-    print(f"RESULTADO DEL SUAVIZADO")
-    print(f"{'='*70}")
-    print(f"Regiones antes: {stats['regiones_antes']}")
-    print(f"Regiones después: {stats['regiones_despues']}")
+    # print(f"\n{'='*70}")
+    # print(f"RESULTADO DEL SUAVIZADO")
+    # print(f"{'='*70}")
+    # print(f"Regiones antes: {stats['regiones_antes']}")
+    # print(f"Regiones después: {stats['regiones_despues']}")
     
-    if stats['fragmentacion'] > 0:
-        print(f"⚠ Fragmentación detectada: +{stats['fragmentacion']} regiones")
-        print(f"  (Algunas regiones se dividieron durante el suavizado)")
-    elif stats['fragmentacion'] < 0:
-        print(f"✓ Fusión detectada: {abs(stats['fragmentacion'])} regiones menos")
-    else:
-        print(f"✓ Número de regiones se mantuvo estable")
+    # if stats['fragmentacion'] > 0:
+    #     print(f"⚠ Fragmentación detectada: +{stats['fragmentacion']} regiones")
+    #     print(f"  (Algunas regiones se dividieron durante el suavizado)")
+    # elif stats['fragmentacion'] < 0:
+    #     print(f"✓ Fusión detectada: {abs(stats['fragmentacion'])} regiones menos")
+    # else:
+    #     print(f"✓ Número de regiones se mantuvo estable")
     
-    print(f"{'='*70}\n")
+    # print(f"{'='*70}\n")
     
     return mapa_final, df_actualizado, stats
 
