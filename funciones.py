@@ -553,6 +553,35 @@ def visualizar_suavizado(imagen_cuantizada, mapa_antes, mapa_despues, df_antes, 
     
     plt.tight_layout()
     plt.show()
+def bordes_1px(mapa_regiones):
+    """
+    Genera bordes de 1 px entre regiones sin duplicar líneas.
+    
+    Parameters
+    ----------
+    mapa_regiones : np.ndarray (H, W)
+        Cada valor representa el id de una región.
+
+    Returns
+    -------
+    bordes : np.ndarray bool (H, W)
+        True donde hay borde.
+    """
+
+    h, w = mapa_regiones.shape
+    bordes = np.zeros((h, w), dtype=bool)
+
+    # Comparación horizontal
+    diff_h = mapa_regiones[:, :-1] != mapa_regiones[:, 1:]
+
+    # Comparación vertical
+    diff_v = mapa_regiones[:-1, :] != mapa_regiones[1:, :]
+
+    # Marcar SOLO un lado del borde
+    bordes[:, :-1] |= diff_h
+    bordes[:-1, :] |= diff_v
+
+    return bordes
 
 def generar_imagen_para_pintar(mapa_regiones, df_regiones, colores_paleta, 
                                 grosor_borde=1, tamano_numero='auto',
@@ -602,7 +631,8 @@ def generar_imagen_para_pintar(mapa_regiones, df_regiones, colores_paleta,
     from skimage.segmentation import find_boundaries
     
     # Encontrar todos los bordes
-    bordes = find_boundaries(mapa_regiones, mode='thick')
+    # bordes = find_boundaries(mapa_regiones, mode='thick')
+    bordes = bordes_1px(mapa_regiones)
     
     # Dilatar bordes para hacerlos más gruesos
     # if grosor_borde > 1:
@@ -857,3 +887,78 @@ def guardar_archivos_finales(img_para_pintar, img_solucion, paleta_numerada,
     print(f"{'='*70}\n")
     
     return archivos_guardados
+
+def calcular_area_minima(h, w, porcentaje=0.1, area_minima=100):
+    calc = int((h * w) * (porcentaje / 100))
+    return min(calc, area_minima) 
+
+import numpy as np
+import pandas as pd
+from scipy import ndimage
+
+
+def colorear_zonas_delgadas(
+    mapa_regiones,
+    df_regiones,
+    colores_paleta,
+    grosor_max=10,
+    color_rojo=(255, 0, 0)
+):
+    """
+    mapa_regiones : np.array (H,W)
+        Cada pixel contiene el id de la región.
+
+    df_regiones : DataFrame
+        Debe tener columnas:
+        - region_id
+        - color_id
+
+    colores_paleta : np.array (N,3)
+        Paleta RGB.
+
+    grosor_max : int
+        Grosor máximo para considerar zona delgada.
+
+    color_rojo : tuple
+        Color RGB para zonas delgadas.
+
+    Retorna:
+        imagen_rgb (H,W,3)
+    """
+
+    # =========================
+    # MAPEO REGION -> COLOR_ID
+    # =========================
+    mapa_color = dict(
+        zip(df_regiones["region_id"], df_regiones["color_id"])
+    )
+
+    # reemplazar region_id por color_id
+    imagen_ids = np.vectorize(mapa_color.get)(mapa_regiones)
+
+    # convertir color_id -> RGB
+    imagen_rgb = colores_paleta[imagen_ids-1]
+
+    # =========================
+    # DETECCION DE ZONAS DELGADAS
+    # =========================
+
+    regiones_unicas = np.unique(mapa_regiones)
+
+    for region_id in regiones_unicas:
+
+        mask = mapa_regiones == region_id
+
+        # distance transform
+        dist = ndimage.distance_transform_edt(mask)
+
+        # grosor local aproximado = 2*dist
+        grosor = dist * 2
+
+        # pixels pertenecientes a zonas delgadas
+        zona_delgada = (mask) & (grosor <= grosor_max)
+
+        # pintar rojo
+        imagen_rgb[zona_delgada] = color_rojo
+
+    return imagen_rgb
