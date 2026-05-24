@@ -11,6 +11,7 @@ from skimage.morphology import disk, remove_small_holes
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 
+
 def cargar_imagen(ruta):
     # ruta = 'img/pensamientos.jpg'
     img_raw = Image.open(ruta)
@@ -153,7 +154,7 @@ def eliminar_1px(img_cuantizada, labels, colores_paleta):
 
     # for i in range(1, n_iteraciones):
     while i <= n_iteraciones:
-        print(f"\nIteración {i}")
+        # print(f"\nIteración {i}")
         #aplicar filtrado
         labels = nearest_color(labels)
         img_filtrada = colores_paleta[labels]
@@ -242,19 +243,19 @@ def filtrar_regiones_pequenas(mapa_regiones, df_regiones, area_minima):
         df_regiones_limpio: DataFrame actualizado
         estadisticas: dict con stats del proceso
     """
-    print(f"\n{'='*70}")
-    print(f"FILTRANDO REGIONES MENORES A {area_minima} PÍXELES")
-    print(f"{'='*70}\n")
+    # print(f"\n{'='*70}")
+    # print(f"FILTRANDO REGIONES MENORES A {area_minima} PÍXELES")
+    # print(f"{'='*70}\n")
     
     # Identificar regiones pequeñas
     regiones_pequenas = df_regiones[df_regiones['area_pixels'] < area_minima].copy()
     regiones_grandes = df_regiones[df_regiones['area_pixels'] >= area_minima].copy()
     
-    print(f"Regiones pequeñas a eliminar: {len(regiones_pequenas)}")
-    print(f"Regiones que se mantienen: {len(regiones_grandes)}")
+    # print(f"Regiones pequeñas a eliminar: {len(regiones_pequenas)}")
+    # print(f"Regiones que se mantienen: {len(regiones_grandes)}")
     
     if len(regiones_pequenas) == 0:
-        print("\n¡No hay regiones pequeñas que filtrar!")
+        # print("\n¡No hay regiones pequeñas que filtrar!")
         return mapa_regiones, df_regiones, {'eliminadas': 0, 'fusionadas': 0}
     
     # Ordenar por tamaño (procesar las más pequeñas primero)
@@ -267,7 +268,7 @@ def filtrar_regiones_pequenas(mapa_regiones, df_regiones, area_minima):
     fusiones = {}  # region_pequena -> region_destino
     regiones_eliminadas = 0
     
-    print("\nProcesando fusiones...")
+    # print("\nProcesando fusiones...")
     for idx, row in regiones_pequenas.iterrows():
         region_id = row['region_id']
         
@@ -281,7 +282,7 @@ def filtrar_regiones_pequenas(mapa_regiones, df_regiones, area_minima):
         vecino_id = encontrar_vecino_mas_cercano(mapa_limpio, region_id, mascara_region, df_regiones)
         
         if vecino_id is None:
-            print(f"  ⚠ Región {region_id} sin vecinos, se mantiene")
+            # print(f"  ⚠ Región {region_id} sin vecinos, se mantiene")
             continue
         
         # Fusionar: reasignar píxeles de region_id a vecino_id
@@ -290,12 +291,13 @@ def filtrar_regiones_pequenas(mapa_regiones, df_regiones, area_minima):
         regiones_eliminadas += 1
         
         if regiones_eliminadas % 50 == 0:
-            print(f"  Procesadas {regiones_eliminadas} fusiones...")
+            # print(f"  Procesadas {regiones_eliminadas} fusiones...")
+            pass
     
-    print(f"\n✓ Fusiones completadas: {regiones_eliminadas}")
+    # print(f"\n✓ Fusiones completadas: {regiones_eliminadas}")
     
     # Reconstruir DataFrame de regiones
-    print("\nRecalculando áreas de regiones...")
+    # print("\nRecalculando áreas de regiones...")
     nuevas_regiones = []
     
     for region_id in np.unique(mapa_limpio):
@@ -334,13 +336,13 @@ def filtrar_regiones_pequenas(mapa_regiones, df_regiones, area_minima):
         'reduccion_porcentaje': 100 * (len(df_regiones) - len(df_limpio)) / len(df_regiones)
     }
     
-    print(f"\n{'='*70}")
-    print(f"RESUMEN DE FILTRADO")
-    print(f"{'='*70}")
-    print(f"Regiones antes: {stats['antes']}")
-    print(f"Regiones después: {stats['despues']}")
-    print(f"Reducción: {stats['reduccion_porcentaje']:.1f}%")
-    print(f"{'='*70}\n")
+    # print(f"\n{'='*70}")
+    # print(f"RESUMEN DE FILTRADO")
+    # print(f"{'='*70}")
+    # print(f"Regiones antes: {stats['antes']}")
+    # print(f"Regiones después: {stats['despues']}")
+    # print(f"Reducción: {stats['reduccion_porcentaje']:.1f}%")
+    # print(f"{'='*70}\n")
     
     return mapa_limpio, df_limpio, stats
 
@@ -892,11 +894,6 @@ def calcular_area_minima(h, w, porcentaje=0.1, area_minima=100):
     calc = int((h * w) * (porcentaje / 100))
     return min(calc, area_minima) 
 
-import numpy as np
-import pandas as pd
-from scipy import ndimage
-
-
 def colorear_zonas_delgadas(
     mapa_regiones,
     df_regiones,
@@ -962,3 +959,760 @@ def colorear_zonas_delgadas(
         imagen_rgb[zona_delgada] = color_rojo
 
     return imagen_rgb
+
+
+def detectar_y_segmentar_regiones_delgadas(mapa_regiones, df_regiones, grosor_max=10, mostrar=True):
+    """
+    Detecta regiones delgadas (conectadas a otras regiones) y las segmenta en regiones separadas.
+    
+    Una zona delgada es aquella parte de una región que tiene un grosor menor que grosor_max,
+    creando "cuellos de botella" o conexiones delgadas entre regiones.
+    
+    Args:
+        mapa_regiones: np.array (H, W) - mapa de regiones actual
+        df_regiones: DataFrame con region_id, color_id, area_pixels, color_rgb
+        grosor_max: int - grosor máximo para considerar una zona como delgada (default: 10)
+        mostrar: bool - si True, muestra la imagen con las zonas delgadas resaltadas
+    
+    Returns:
+        mapa_delgadas: np.array (H, W) - nuevo mapa con regiones delgadas separadas
+        df_delgadas: DataFrame - información de las nuevas regiones delgadas
+        imagen_visual: np.array - imagen para visualizar (None si mostrar=False)
+    """
+    from scipy.ndimage import distance_transform_edt, label
+    
+    mapa_delgadas = mapa_regiones.copy()
+    regiones_delgadas_info = []
+    
+    h, w = mapa_regiones.shape
+    
+    print(f"Detectando zonas delgadas (grosor <= {grosor_max}px)...")
+    
+    regiones_unicas = np.unique(mapa_regiones)
+    regiones_unicas = regiones_unicas[regiones_unicas != 0]
+    
+    nuevo_region_id = df_regiones['region_id'].max() + 1
+    
+    total_zonas_delgadas = 0
+    
+    for region_id in regiones_unicas:
+        mascara_original = (mapa_regiones == region_id)
+        
+        dist = distance_transform_edt(mascara_original)
+        grosor_local = dist * 2
+        
+        zona_delgada = mascara_original & (grosor_local <= grosor_max)
+        
+        if not zona_delgada.any():
+            continue
+        
+        zona_delgada_bool = zona_delgada.astype(np.uint8)
+        distancia_invertida = distance_transform_edt(1 - zona_delgada_bool)
+        mascara_zona = zona_delgada & (distancia_invertida > 0)
+        
+        labeled_delgadas, num_zonas = label(mascara_zona)
+        
+        if num_zonas == 0:
+            continue
+        
+        info_original = df_regiones[df_regiones['region_id'] == region_id].iloc[0]
+        
+        for i in range(1, num_zonas + 1):
+            mascara_zona_i = (labeled_delgadas == i)
+            area_zona = np.sum(mascara_zona_i)
+            
+            if area_zona < 5:
+                continue
+            
+            mascara_sin_zona = mascara_original & ~mascara_zona_i
+            tiene_continuacion = mascara_sin_zona.any()
+            
+            color_id = info_original['color_id']
+            if tiene_continuacion:
+                color_id = color_id + 100
+            
+            mapa_delgadas[mascara_zona_i] = nuevo_region_id
+            
+            regiones_delgadas_info.append({
+                'region_id': nuevo_region_id,
+                'color_id': color_id,
+                'color_rgb': info_original['color_rgb'],
+                'area_pixels': area_zona,
+                'porcentaje': 100 * area_zona / (h * w),
+                'tipo': 'zona_delgada'
+            })
+            
+            total_zonas_delgadas += 1
+            nuevo_region_id += 1
+    
+    df_delgadas = pd.DataFrame(regiones_delgadas_info)
+    
+    print(f"  → {total_zonas_delgadas} zonas delgadas separadas en {len(df_delgadas)} regiones")
+    
+    imagen_visual = None
+    if mostrar:
+        print("  Generando visualización...")
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        
+        axes[0].imshow(mapa_regiones, cmap='nipy_spectral', interpolation='nearest')
+        axes[0].set_title(f'Original: {len(regiones_unicas)} regiones', fontsize=12)
+        axes[0].axis('off')
+        
+        axes[1].imshow(mapa_delgadas, cmap='nipy_spectral', interpolation='nearest')
+        axes[1].set_title(f'Delgadas separadas: {len(np.unique(mapa_delgadas))-1} regiones', fontsize=12)
+        axes[1].axis('off')
+        
+        mapa_colores = np.zeros((h, w, 3), dtype=np.uint8)
+        for _, row in df_regiones.iterrows():
+            rid = row['region_id']
+            color = row['color_rgb']
+            mascara = (mapa_regiones == rid)
+            mapa_colores[mascara] = color
+        
+        if len(df_delgadas) > 0:
+            for _, row in df_delgadas.iterrows():
+                rid = row['region_id']
+                color = (255, 0, 0)
+                mascara = (mapa_delgadas == rid)
+                mapa_colores[mascara] = color
+        
+        axes[2].imshow(mapa_colores)
+        axes[2].set_title('Zonas delgadas en ROJO', fontsize=12)
+        axes[2].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        imagen_visual = mapa_colores
+    
+    return mapa_delgadas, df_delgadas, imagen_visual
+
+
+def detectar_regiones_sin_espacio_para_numero(mapa_regiones, df_regiones, tamano_fuente=10, mostrar=True):
+    """
+    Detecta regiones donde no cabe un número del tamaño especificado y las muestra en rojo.
+    
+    Una región "no cabe" cuando el área del número (basada en tamano_fuente) se sale de los
+    límites de la región, es decir, el centro de la región está demasiado cerca de los bordes.
+    
+    Args:
+        mapa_regiones: np.array (H, W) - mapa de regiones
+        df_regiones: DataFrame con region_id, color_id, area_pixels, color_rgb
+        tamano_fuente: int - tamaño del número en píxeles (default: 10)
+        mostrar: bool - si True, muestra la imagen con las regiones problemáticas en rojo
+    
+    Returns:
+        df_problematicas: DataFrame con info de las regiones que no caben
+        imagen_visual: np.array - imagen para visualizar (None si mostrar=False)
+    """
+    radio = tamano_fuente // 2 + 2
+    h, w = mapa_regiones.shape
+    
+    print(f"Detectando regiones donde no cabe número de tamaño {tamano_fuente}px...")
+    
+    regiones_problema = []
+    
+    for _, row in df_regiones.iterrows():
+        region_id = row['region_id']
+        color_id = row['color_id']
+        mascara = (mapa_regiones == region_id)
+        
+        coords = np.argwhere(mascara)
+        if len(coords) == 0:
+            continue
+        
+        min_y, min_x = coords.min(axis=0)
+        max_y, max_x = coords.max(axis=0)
+        
+        centro_y = (min_y + max_y) // 2
+        centro_x = (min_x + max_x) // 2
+        
+        region_cabe = (
+            centro_y - radio >= min_y and centro_y + radio <= max_y and
+            centro_x - radio >= min_x and centro_x + radio <= max_x
+        )
+        
+        if not region_cabe:
+            regiones_problema.append({
+                'region_id': region_id,
+                'color_id': color_id,
+                'color_rgb': row['color_rgb'],
+                'area_pixels': row['area_pixels'],
+                'porcentaje': row['porcentaje'],
+                'min_x': min_x, 'max_x': max_x,
+                'min_y': min_y, 'max_y': max_y,
+                'centro_x': centro_x, 'centro_y': centro_y,
+                'ancho_region': max_x - min_x,
+                'alto_region': max_y - min_y
+            })
+    
+    df_problematicas = pd.DataFrame(regiones_problema)
+    
+    print(f"  → {len(df_problematicas)} regiones donde NO cabe el número")
+    
+    imagen_visual = None
+    if mostrar and len(df_problematicas) > 0:
+        print("  Generando visualización...")
+        
+        fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+        
+        mapa_colores = np.zeros((h, w, 3), dtype=np.uint8)
+        for _, row in df_regiones.iterrows():
+            rid = row['region_id']
+            color = row['color_rgb']
+            mascara = (mapa_regiones == rid)
+            mapa_colores[mascara] = color
+        
+        for _, row in df_problematicas.iterrows():
+            rid = row['region_id']
+            mascara = (mapa_regiones == rid)
+            mapa_colores[mascara] = (255, 0, 0)
+        
+        axes[0].imshow(mapa_colores)
+        axes[0].set_title(f'Regiones sin espacio (rojo): {len(df_problematicas)}', fontsize=12, fontweight='bold')
+        axes[0].axis('off')
+        
+        img_numeros = np.ones((h, w, 3), dtype=np.uint8) * 255
+        img_pil = Image.fromarray(img_numeros)
+        draw = ImageDraw.Draw(img_pil)
+        
+        try:
+            fuente = ImageFont.truetype("arial.ttf", tamano_fuente)
+        except:
+            fuente = ImageFont.load_default()
+        
+        for _, row in df_regiones.iterrows():
+            rid = row['region_id']
+            cid = row['color_id']
+            mascara = (mapa_regiones == rid)
+            coords = np.argwhere(mascara)
+            if len(coords) == 0:
+                continue
+            
+            cy = int(coords[:, 0].mean())
+            cx = int(coords[:, 1].mean())
+            
+            es_problema = rid in df_problematicas['region_id'].values
+            color_texto = (255, 0, 0) if es_problema else (0, 0, 0)
+            
+            texto = str(cid)
+            draw.text((cx - 3, cy - 3), texto, fill=color_texto, font=fuente)
+        
+        axes[1].imshow(np.array(img_pil))
+        axes[1].set_title('Números en rojo = no caben', fontsize=12)
+        axes[1].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        imagen_visual = mapa_colores
+    
+    return df_problematicas, imagen_visual
+
+
+def detectar_zonas_sin_espacio_para_numero(mapa_regiones, df_regiones, tamano_fuente=10, metodo='B', mostrar=True):
+    """
+    Detecta zonas donde NO cabe un número del tamaño especificado.
+    
+    Método B: Solo detecta zonas muy delgadas (distance_transform)
+        - Detecta zonas donde el grosor local es menor que el tamaño del número
+        - Estas zonas definitivamente no tienen espacio para un número
+    
+    Método C: Combina detección de zonas delgadas + verificación de centro
+        - Lo mismo que B, más detecta regiones donde el centro está cerca del borde
+    
+    Args:
+        mapa_regiones: np.array (H, W) - mapa de regiones
+        df_regiones: DataFrame con region_id, color_id, area_pixels, color_rgb
+        tamano_fuente: int - tamaño del número en píxeles (default: 10)
+        metodo: str - 'B' (solo distance_transform) o 'C' (combinado), default: 'B'
+        mostrar: bool - si True, muestra la imagen con las zonas en rojo
+    
+    Returns:
+        mapa_problematico: np.array - nuevo mapa con zonas problemáticas separadas
+        df_zonas: DataFrame - info de las zonas que no caben
+        imagen_visual: np.array - imagen para visualizar (None si mostrar=False)
+    """
+    from scipy.ndimage import distance_transform_edt, label
+    
+    if metodo not in ['B', 'C']:
+        metodo = 'B'
+    
+    radio = tamano_fuente // 2
+    h, w = mapa_regiones.shape
+    
+    print(f"Detectando zonas donde NO cabe número de tamaño {tamano_fuente}px (método={metodo})...")
+    
+    mapa_problematico = mapa_regiones.copy()
+    zonas_info = []
+    
+    nuevo_region_id = df_regiones['region_id'].max() + 1
+    
+    regiones_unicas = np.unique(mapa_regiones)
+    regiones_unicas = regiones_unicas[regiones_unicas != 0]
+    
+    total_zonas = 0
+    
+    for region_id in regiones_unicas:
+        mascara = (mapa_regiones == region_id)
+        
+        info_original = df_regiones[df_regiones['region_id'] == region_id].iloc[0]
+        
+        dist = distance_transform_edt(mascara)
+        grosor_local = dist * 2
+        
+        zona_delgada = mascara & (grosor_local <= tamano_fuente)
+        
+        if zona_delgada.any():
+            zona_delgada_bool = zona_delgada.astype(np.uint8)
+            distancia_invertida = distance_transform_edt(1 - zona_delgada_bool)
+            mascara_delgada = zona_delgada & (distancia_invertida > 0)
+            
+            labeled, num_zonas = label(mascara_delgada)
+            
+            for i in range(1, num_zonas + 1):
+                mascara_zona = (labeled == i)
+                area_zona = np.sum(mascara_zona)
+                
+                if area_zona < 3:
+                    continue
+                
+                mapa_problematico[mascara_zona] = nuevo_region_id
+                
+                zonas_info.append({
+                    'region_id': nuevo_region_id,
+                    'region_original': region_id,
+                    'color_id': info_original['color_id'] + 100,
+                    'color_rgb': (255, 0, 0),
+                    'area_pixels': area_zona,
+                    'tipo': 'zona_delgada'
+                })
+                
+                total_zonas += 1
+                nuevo_region_id += 1
+        
+        if metodo == 'C':
+            coords = np.argwhere(mascara)
+            if len(coords) == 0:
+                continue
+            
+            min_y, min_x = coords.min(axis=0)
+            max_y, max_x = coords.max(axis=0)
+            
+            centro_y = (min_y + max_y) // 2
+            centro_x = (min_x + max_x) // 2
+            
+            region_cabe = (
+                centro_y - radio >= min_y and centro_y + radio <= max_y and
+                centro_x - radio >= min_x and centro_x + radio <= max_x
+            )
+            
+            if not region_cabe:
+                coords_centro = np.argwhere(mascara)
+                coords_centro = coords_centro[(coords_centro[:, 0] >= min_y) & 
+                                             (coords_centro[:, 0] <= max_y) &
+                                             (coords_centro[:, 1] >= min_x) & 
+                                             (coords_centro[:, 1] <= max_x)]
+                
+                if len(coords_centro) > 0:
+                    mask_centro = np.zeros_like(mascara, dtype=bool)
+                    mask_centro[coords_centro[:, 0], coords_centro[:, 1]] = True
+                    
+                    mascara_centro = mascara & mask_centro
+                    area_centro = np.sum(mascara_centro)
+                    
+                    if area_centro > 3:
+                        mapa_problematico[mascara_centro] = nuevo_region_id
+                        
+                        zonas_info.append({
+                            'region_id': nuevo_region_id,
+                            'region_original': region_id,
+                            'color_id': info_original['color_id'] + 200,
+                            'color_rgb': (255, 100, 100),
+                            'area_pixels': area_centro,
+                            'tipo': 'centro_sin_espacio'
+                        })
+                        
+                        total_zonas += 1
+                        nuevo_region_id += 1
+    
+    df_zonas = pd.DataFrame(zonas_info)
+    
+    print(f"  → {total_zonas} zonas detectadas donde NO cabe el número")
+    
+    imagen_visual = None
+    if mostrar:
+        print("  Generando visualización...")
+        
+        fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+        
+        mapa_colores = np.zeros((h, w, 3), dtype=np.uint8)
+        for _, row in df_regiones.iterrows():
+            rid = row['region_id']
+            color = row['color_rgb']
+            mascara = (mapa_regiones == rid)
+            mapa_colores[mascara] = color
+        
+        if len(df_zonas) > 0:
+            for _, row in df_zonas.iterrows():
+                rid = row['region_id']
+                mascara = (mapa_problematico == rid)
+                mapa_colores[mascara] = row['color_rgb']
+        
+        axes[0].imshow(mapa_colores)
+        axes[0].set_title(f'Zonas sin espacio (rojo): {len(df_zonas)}', fontsize=12, fontweight='bold')
+        axes[0].axis('off')
+        
+        img_numeros = np.ones((h, w, 3), dtype=np.uint8) * 255
+        img_pil = Image.fromarray(img_numeros)
+        draw = ImageDraw.Draw(img_pil)
+        
+        try:
+            fuente = ImageFont.truetype("arial.ttf", tamano_fuente)
+        except:
+            fuente = ImageFont.load_default()
+        
+        for _, row in df_regiones.iterrows():
+            rid = row['region_id']
+            cid = row['color_id']
+            mascara = (mapa_regiones == rid)
+            coords = np.argwhere(mascara)
+            if len(coords) == 0:
+                continue
+            
+            cy = int(coords[:, 0].mean())
+            cx = int(coords[:, 1].mean())
+            
+            es_problema = rid in df_zonas['region_original'].values if len(df_zonas) > 0 else False
+            color_texto = (255, 0, 0) if es_problema else (0, 0, 0)
+            
+            texto = str(cid)
+            draw.text((cx - 3, cy - 3), texto, fill=color_texto, font=fuente)
+        
+        axes[1].imshow(np.array(img_pil))
+        axes[1].set_title('Números en rojo = no caben', fontsize=12)
+        axes[1].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        imagen_visual = mapa_colores
+    
+    return mapa_problematico, df_zonas, imagen_visual
+
+
+def detectar_zonas_delgadas_opencv(mapa_regiones, df_regiones, tamano_minimo=5, mostrar=True):
+    """
+    Detecta zonas delgadas usando morphología de OpenCV (erosión).
+    
+    La técnica usa erosión: las zonas más delgadas que tamano_minimo desaparecen
+    después de la erosión. Estas zonas eliminadas son las "zonas delgadas".
+    
+    Args:
+        mapa_regiones: np.array (H, W) - mapa de regiones
+        df_regiones: DataFrame con region_id, color_id, area_pixels, color_rgb
+        tamano_minimo: int - tamaño mínimo del elemento estructurante (default: 5)
+        mostrar: bool - si True, muestra la imagen
+    
+    Returns:
+        mapa_delgadas: np.array - mapa con zonas delgadas separadas
+        df_delgadas: DataFrame - info de las zonas delgadas
+        imagen_visual: np.array - imagen para visualizar
+    """
+    h, w = mapa_regiones.shape
+    
+    print(f"Detectando zonas delgadas (tamaño mínimo: {tamano_minimo}px)...")
+    
+    se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (tamano_minimo, tamano_minimo))
+    
+    mapa_problematico = mapa_regiones.copy()
+    zonas_info = []
+    
+    nuevo_region_id = df_regiones['region_id'].max() + 1
+    total_zonas = 0
+    
+    for region_id in df_regiones['region_id'].values:
+        mascara = (mapa_regiones == region_id).astype(np.uint8)
+        
+        mascara_erodada = cv2.erode(mascara, se, iterations=1)
+        
+        zonas_delgadas = (mascara - mascara_erodada).astype(np.uint8)
+        
+        if zonas_delgadas.sum() == 0:
+            continue
+        
+        labeled, num_zonas, stats, _ = cv2.connectedComponentsWithStats(zonas_delgadas, connectivity=8)
+        
+        if num_zonas == 0:
+            continue
+        
+        info_original = df_regiones[df_regiones['region_id'] == region_id].iloc[0]
+        
+        for i in range(1, num_zonas):
+            area_zona = stats[i, cv2.CC_STAT_AREA]
+            
+            if area_zona < 3:
+                continue
+            
+            mascara_zona = (labeled == i)
+            mapa_problematico[mascara_zona] = nuevo_region_id
+            
+            zonas_info.append({
+                'region_id': nuevo_region_id,
+                'region_original': region_id,
+                'color_id': info_original['color_id'] + 100,
+                'color_rgb': (255, 0, 0),
+                'area_pixels': int(area_zona),
+                'tipo': 'zona_delgada'
+            })
+            
+            nuevo_region_id += 1
+            total_zonas += 1
+    
+    df_delgadas = pd.DataFrame(zonas_info)
+    
+    print(f"  → {total_zonas} zonas delgadas detectadas")
+    
+    imagen_visual = None
+    if mostrar:
+        print("  Generando visualización...")
+        
+        fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+        
+        mapa_colores = np.zeros((h, w, 3), dtype=np.uint8)
+        for _, row in df_regiones.iterrows():
+            rid = row['region_id']
+            color = row['color_rgb']
+            mascara = (mapa_regiones == rid)
+            mapa_colores[mascara] = color
+        
+        if len(df_delgadas) > 0:
+            for _, row in df_delgadas.iterrows():
+                rid = row['region_id']
+                mascara = (mapa_problematico == rid)
+                mapa_colores[mascara] = (255, 0, 0)
+        
+        axes[0].imshow(mapa_colores)
+        axes[0].set_title(f'Zonas delgadas (rojo): {len(df_delgadas)}', fontsize=12, fontweight='bold')
+        axes[0].axis('off')
+        
+        img_numeros = np.ones((h, w, 3), dtype=np.uint8) * 255
+        img_pil = Image.fromarray(img_numeros)
+        draw = ImageDraw.Draw(img_pil)
+        
+        try:
+            fuente = ImageFont.truetype("arial.ttf", 10)
+        except:
+            fuente = ImageFont.load_default()
+        
+        for _, row in df_regiones.iterrows():
+            rid = row['region_id']
+            cid = row['color_id']
+            mascara = (mapa_regiones == rid)
+            coords = np.argwhere(mascara)
+            if len(coords) == 0:
+                continue
+            
+            cy = int(coords[:, 0].mean())
+            cx = int(coords[:, 1].mean())
+            
+            es_delgada = rid in df_delgadas['region_original'].values if len(df_delgadas) > 0 else False
+            color_texto = (255, 0, 0) if es_delgada else (0, 0, 0)
+            
+            draw.text((cx - 3, cy - 3), str(cid), fill=color_texto, font=fuente)
+        
+        axes[1].imshow(np.array(img_pil))
+        axes[1].set_title('Números en rojo = zona delgada', fontsize=12)
+        axes[1].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        imagen_visual = mapa_colores
+    
+    return mapa_problematico, df_delgadas, imagen_visual
+
+
+def dibujar_bordes_negro(mapa_regiones, imagen_base=None):
+    """
+    Dibuja los bordes de las regiones en color negro.
+    
+    Args:
+        mapa_regiones: np.array (H, W) - mapa de regiones
+        imagen_base: np.array (H, W, 3) - imagen base (opcional, crea blanca)
+    
+    Returns:
+        imagen_con_bordes: np.array (H, W, 3)
+    """
+    h, w = mapa_regiones.shape
+    
+    if imagen_base is None:
+        imagen_base = np.ones((h, w, 3), dtype=np.uint8) * 255
+    
+    bordes = bordes_1px(mapa_regiones)
+    imagen_resultado = imagen_base.copy()
+    imagen_resultado[bordes] = [0, 0, 0]
+    
+    return imagen_resultado
+
+
+def agregar_numeros_regiones(mapa_regiones, df_regiones, imagen_base, tamano_fuente=10):
+    """
+    Agrega el número de color_id en el centroide de cada región.
+    
+    Args:
+        mapa_regiones: np.array (H, W)
+        df_regiones: DataFrame con region_id y color_id
+        imagen_base: np.array (H, W, 3)
+        tamano_fuente: int
+    
+    Returns:
+        imagen_con_numeros: np.array (H, W, 3)
+    """
+    img_pil = Image.fromarray(imagen_base)
+    draw = ImageDraw.Draw(img_pil)
+    
+    try:
+        fuente = ImageFont.truetype("arial.ttf", tamano_fuente)
+    except:
+        try:
+            fuente = ImageFont.truetype("DejaVuSans-Bold.ttf", tamano_fuente)
+        except:
+            fuente = ImageFont.load_default()
+    
+    for _, row in df_regiones.iterrows():
+        region_id = row['region_id']
+        color_id = row['color_id']
+        
+        mascara = (mapa_regiones == region_id)
+        coords = np.argwhere(mascara)
+        
+        if len(coords) == 0:
+            continue
+        
+        centroide_y = int(coords[:, 0].mean())
+        centroide_x = int(coords[:, 1].mean())
+        
+        texto = str(color_id)
+        bbox = draw.textbbox((0, 0), texto, font=fuente)
+        texto_w = bbox[2] - bbox[0]
+        texto_h = bbox[3] - bbox[1]
+        
+        pos_x = centroide_x - texto_w // 2
+        pos_y = centroide_y - texto_h // 2
+        
+        draw.text((pos_x, pos_y), texto, fill=(0, 0, 0), font=fuente)
+    
+    return np.array(img_pil)
+
+
+def expandir_regiones_para_caber_numero(mapa_regiones, df_regiones, tamano_fuente=10):
+    """
+    Expande regiones donde el número toca los bordes hacia el vecino más grande del MISMO color.
+    El centroide se calcula usando el centro del bbox para evitar problemas con formas curvas.
+    IMPORTANTE: Solo expande hacia regiones del mismo color_id para mantener los bordes visuales.
+    
+    Args:
+        mapa_regiones: np.array (H, W)
+        df_regiones: DataFrame con region_id, color_id, area_pixels
+        tamano_fuente: int (aproximación del tamaño del número)
+    
+    Returns:
+        mapa_regiones_expandido: np.array (H, W)
+        regiones_expandidas: list de region_ids que fueron expandidas
+    """
+    from scipy.ndimage import binary_dilation
+    
+    mapa_expandido = mapa_regiones.copy()
+    regiones_expandidas = []
+    
+    radio = tamano_fuente // 2 + 2
+    h, w = mapa_regiones.shape
+    
+    for _, row in df_regiones.iterrows():
+        region_id = row['region_id']
+        color_id = row['color_id']
+        mascara = (mapa_regiones == region_id)
+        
+        coords = np.argwhere(mascara)
+        if len(coords) == 0:
+            continue
+        
+        min_y, min_x = coords.min(axis=0)
+        max_y, max_x = coords.max(axis=0)
+        
+        centro_y = (min_y + max_y) // 2
+        centro_x = (min_x + max_x) // 2
+        
+        region_cabe = (
+            centro_y - radio >= min_y and centro_y + radio <= max_y and
+            centro_x - radio >= min_x and centro_x + radio <= max_x
+        )
+        
+        if region_cabe:
+            continue
+        
+        estructura = np.ones((3, 3))
+        mascara_exp = mascara.copy()
+        
+        mejor_vecino_id = None
+        mejor_area = 0
+        
+        for paso in range(25):
+            mascara_ant = mascara_exp.copy()
+            mascara_exp = binary_dilation(mascara_exp, structure=estructura)
+            
+            nuevos_pixeles = mascara_exp & ~mascara_ant
+            if not nuevos_pixeles.any():
+                break
+            
+            vecinos_dict = {}
+            for py, px in np.argwhere(nuevos_pixeles):
+                if 0 < py < h - 1 and 0 < px < w - 1:
+                    for dy, dx in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+                        pid = mapa_regiones[py+dy, px+dx]
+                        if pid != 0 and pid != region_id:
+                            if pid not in vecinos_dict:
+                                info_v = df_regiones[df_regiones['region_id'] == pid]
+                                if len(info_v) > 0:
+                                    color_v = info_v['color_id'].values[0]
+                                    area_v = info_v['area_pixels'].values[0]
+                                    if color_v == color_id:
+                                        vecinos_dict[pid] = area_v
+            
+            if not vecinos_dict:
+                continue
+            
+            candidato_id = max(vecinos_dict, key=vecinos_dict.get)
+            candidato_area = vecinos_dict[candidato_id]
+            
+            coords_exp = np.argwhere(mascara_exp)
+            min_y_e, min_x_e = coords_exp.min(axis=0)
+            max_y_e, max_x_e = coords_exp.max(axis=0)
+            
+            cabe = (
+                centro_y - radio >= min_y_e and centro_y + radio <= max_y_e and
+                centro_x - radio >= min_x_e and centro_x + radio <= max_x_e
+            )
+            
+            if cabe and candidato_area > mejor_area:
+                mejor_vecino_id = candidato_id
+                mejor_area = candidato_area
+        
+        if mejor_vecino_id is not None:
+            mascara_final = (mapa_regiones == region_id) | (mapa_regiones == mejor_vecino_id)
+            
+            coords_final = np.argwhere(mascara_final)
+            min_y_f, min_x_f = coords_final.min(axis=0)
+            max_y_f, max_x_f = coords_final.max(axis=0)
+            
+            cabe_final = (
+                centro_y - radio >= min_y_f and centro_y + radio <= max_y_f and
+                centro_x - radio >= min_x_f and centro_x + radio <= max_x_f
+            )
+            
+            if cabe_final:
+                mapa_expandido[mascara_final] = region_id
+                regiones_expandidas.append(region_id)
+    
+    return mapa_expandido, regiones_expandidas

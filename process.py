@@ -54,16 +54,27 @@ mapa_regiones_limpio, df_regiones_limpio, stats_filtrado = f.filtrar_regiones_pe
     df_regiones,
     area_minima_est
 )
+# Guardar paso 3
+mapa_colores = dict(zip(df_regiones_limpio['region_id'], df_regiones_limpio['color_id']))
+
+img_regiones_filtrado = np.vectorize(mapa_colores.get)(mapa_regiones_limpio.reshape(-1))
+
+img_regiones_filtrado = img_regiones_filtrado.reshape(h, w)
+
+img_regiones_filtradas = colores_paleta[img_regiones_filtrado - 1]
+
+Image.fromarray(img_regiones_filtradas).save('img/pensamientos_paso3.png')
+
 #--------------------------------------------------------------
 
-resultado = f.colorear_zonas_delgadas(
-    mapa_regiones,
-    df_regiones_limpio,
-    colores_paleta,
-    grosor_max=10
-)
+# resultado = f.colorear_zonas_delgadas(
+#     mapa_regiones,
+#     df_regiones_limpio,
+#     colores_paleta,
+#     grosor_max=10
+# )
 
-Image.fromarray(resultado).save('output/paso3_2/regiones_delgadas_destacadas.png')
+# Image.fromarray(resultado).save('output/paso3_2/regiones_delgadas_destacadas.png')
 
 
 # Preparar imagen ya filtrada
@@ -82,18 +93,18 @@ Image.fromarray(resultado).save('output/paso3_2/regiones_delgadas_destacadas.png
 # Paso 4: generar imagen para pintar por números
 #--------------------------------------------------------------
 # Parámetros ajustables
-GROSOR_BORDE = 1  # Grosor de los bordes en píxeles (2-5 recomendado)
-TAMANO_NUMERO = 10  # 'auto' o un número fijo (ej: 20, 30, 40)
-FONDO_BLANCO = True  # True = fondo blanco, False = colores tenues de guía
+# GROSOR_BORDE = 1  # Grosor de los bordes en píxeles (2-5 recomendado)
+# TAMANO_NUMERO = 10  # 'auto' o un número fijo (ej: 20, 30, 40)
+# FONDO_BLANCO = True  # True = fondo blanco, False = colores tenues de guía
 
-img_para_pintar, img_solucion, paleta_numerada = f.generar_imagen_para_pintar(
-    mapa_regiones_limpio,
-    df_regiones_limpio,
-    colores_paleta,
-    grosor_borde=GROSOR_BORDE,
-    tamano_numero=TAMANO_NUMERO,
-    fondo_blanco=FONDO_BLANCO
-)
+# img_para_pintar, img_solucion, paleta_numerada = f.generar_imagen_para_pintar(
+#     mapa_regiones_limpio,
+#     df_regiones_limpio,
+#     colores_paleta,
+#     grosor_borde=GROSOR_BORDE,
+#     tamano_numero=TAMANO_NUMERO,
+#     fondo_blanco=FONDO_BLANCO
+# )
 #--------------------------------------------------------------
 
 
