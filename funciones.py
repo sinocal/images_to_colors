@@ -232,12 +232,12 @@ def encontrar_vecino_mas_cercano(mapa_regiones, region_id, mascara_region, df_re
 def filtrar_regiones_pequenas(mapa_regiones, df_regiones, area_minima):
     """
     Elimina regiones pequeñas fusionándolas con sus vecinos
-    
+
     Args:
         mapa_regiones: mapa de regiones actual
         df_regiones: DataFrame con info de regiones
         area_minima: umbral de área mínima en píxeles
-    
+
     Returns:
         mapa_regiones_limpio: mapa actualizado
         df_regiones_limpio: DataFrame actualizado
@@ -284,7 +284,7 @@ def filtrar_regiones_pequenas(mapa_regiones, df_regiones, area_minima):
         if vecino_id is None:
             # print(f"  ⚠ Región {region_id} sin vecinos, se mantiene")
             continue
-        
+
         # Fusionar: reasignar píxeles de region_id a vecino_id
         mapa_limpio[mapa_limpio == region_id] = vecino_id
         fusiones[region_id] = vecino_id
@@ -555,6 +555,37 @@ def visualizar_suavizado(imagen_cuantizada, mapa_antes, mapa_despues, df_antes, 
     
     plt.tight_layout()
     plt.show()
+def visualizar_zonas_sin_espacio(mapa_regiones, df_regiones, colores_paleta, tamano_fuente=10):
+    """
+    Genera imagen diagnóstico:
+    - Color original: zona donde entra el número (dist >= tamano_fuente/2)
+    - Rojo:           zona demasiado delgada (dist <  tamano_fuente/2)
+    Regiones 100% rojas son candidatas a fusión (apéndices).
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    h, w = mapa_regiones.shape
+    imagen = np.zeros((h, w, 3), dtype=np.uint8)
+
+    color_map = df_regiones.set_index('region_id').apply(
+        lambda r: colores_paleta[int(r['color_id']) - 1], axis=1
+    ).to_dict()
+
+    radio = tamano_fuente / 2
+
+    for region_id, color in color_map.items():
+        mascara = (mapa_regiones == region_id)
+        if not mascara.any():
+            continue
+        dist = distance_transform_edt(mascara)
+        con_espacio = mascara & (dist >= radio)
+        sin_espacio = mascara & (dist < radio)
+        imagen[con_espacio] = color
+        imagen[sin_espacio] = (220, 30, 30)
+
+    return imagen
+
+
 def bordes_1px(mapa_regiones):
     """
     Genera bordes de 1 px entre regiones sin duplicar líneas.
@@ -691,13 +722,13 @@ def generar_imagen_para_pintar(mapa_regiones, df_regiones, colores_paleta,
         
         mascara = (mapa_regiones == region_id)
         
-        # Calcular centroide
-        coords = np.argwhere(mascara)
-        if len(coords) == 0:
+        if not mascara.any():
             continue
-        
-        centroide_y = int(coords[:, 0].mean())
-        centroide_x = int(coords[:, 1].mean())
+
+        # Punto de máxima distancia al borde: siempre dentro de la región y en su parte más ancha
+        dist = ndimage.distance_transform_edt(mascara)
+        idx_max = np.unravel_index(np.argmax(dist), dist.shape)
+        centroide_y, centroide_x = int(idx_max[0]), int(idx_max[1])
         
         # Obtener número para esta región
         color_id, numero = numeros_map.get(region_id, (0, 0))
@@ -1604,6 +1635,159 @@ def agregar_numeros_regiones(mapa_regiones, df_regiones, imagen_base, tamano_fue
         draw.text((pos_x, pos_y), texto, fill=(0, 0, 0), font=fuente)
     
     return np.array(img_pil)
+
+
+def fusionar_regiones_delgadas(mapa_regiones, df_regiones, tamano_fuente=10):
+    """
+    Fusiona regiones donde no cabe un número en ningún punto de su espacio.
+    Criterio: max(distance_transform_edt(mask)) * 2 < tamano_fuente
+    El mayor círculo inscribible tiene diámetro < tamano_fuente → imposible colocar el dígito.
+    Itera hasta convergencia (máximo 20 rondas).
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    mapa_limpio = mapa_regiones.copy()
+    df_actual = df_regiones.copy()
+    h, w = mapa_limpio.shape
+
+    for _ in range(20):
+        regiones_delgadas = []
+
+        for _, row in df_actual.iterrows():
+            region_id = row['region_id']
+            mascara = (mapa_limpio == region_id)
+            if not mascara.any():
+                continue
+            dist = distance_transform_edt(mascara)
+            diametro_max = dist.max() * 2
+            if diametro_max < tamano_fuente:
+                regiones_delgadas.append((diametro_max, region_id))
+
+        if not regiones_delgadas:
+            break
+
+        regiones_delgadas.sort()
+
+        fusiones = 0
+        for _, region_id in regiones_delgadas:
+            mascara = (mapa_limpio == region_id)
+            if not mascara.any():
+                continue
+            vecino_id = encontrar_vecino_mas_cercano(mapa_limpio, region_id, mascara, df_actual)
+            if vecino_id is None:
+                continue
+            mapa_limpio[mapa_limpio == region_id] = vecino_id
+            fusiones += 1
+
+        if fusiones == 0:
+            break
+
+        nuevas_regiones = []
+        for region_id in np.unique(mapa_limpio):
+            if region_id == 0:
+                continue
+            mascara = (mapa_limpio == region_id)
+            area = int(np.sum(mascara))
+            info = df_actual[df_actual['region_id'] == region_id]
+            if len(info) == 0:
+                continue
+            nuevas_regiones.append({
+                'region_id': region_id,
+                'color_id': info.iloc[0]['color_id'],
+                'color_rgb': info.iloc[0]['color_rgb'],
+                'area_pixels': area,
+                'porcentaje': 100 * area / (h * w)
+            })
+        df_actual = pd.DataFrame(nuevas_regiones)
+
+    return mapa_limpio, df_actual
+
+
+def separar_apendices_por_cuello(mapa_regiones, df_regiones, tamano_fuente=10):
+    """
+    Detecta apéndices dentro de regiones usando cuello de botella:
+    1. Erosiona cada región tamano_fuente//2 veces.
+    2. Si la erosión divide la región en 2+ componentes → hay cuello de botella.
+    3. Usa watershed para asignar los píxeles originales a cada subregión.
+    4. El componente más grande mantiene el region_id original (cuerpo).
+    5. Los componentes menores (apéndices) reciben nuevos IDs.
+    6. Si un apéndice es demasiado delgado → se dilata hasta que quepa un número.
+    """
+    from scipy.ndimage import distance_transform_edt, binary_erosion, binary_dilation
+    from scipy.ndimage import label as scipy_label
+    from skimage.segmentation import watershed
+
+    mapa_nuevo = mapa_regiones.copy()
+    h, w = mapa_nuevo.shape
+    estructura = np.ones((3, 3))
+    n_erosiones = max(1, tamano_fuente // 2)
+
+    all_info = {row['region_id']: {'color_id': row['color_id'], 'color_rgb': row['color_rgb']}
+                for _, row in df_regiones.iterrows()}
+
+    nuevo_id = int(df_regiones['region_id'].max()) + 1
+
+    for _, row in df_regiones.iterrows():
+        region_id = row['region_id']
+        mascara = (mapa_nuevo == region_id)
+        if not mascara.any():
+            continue
+
+        # Erosionar para encontrar el cuello de botella
+        mascara_erodada = mascara.copy()
+        for _ in range(n_erosiones):
+            mascara_erodada = binary_erosion(mascara_erodada, structure=estructura)
+
+        if not mascara_erodada.any():
+            continue  # región completamente erodada, será manejada por fusionar_regiones_delgadas
+
+        componentes, num_comp = scipy_label(mascara_erodada)
+        if num_comp <= 1:
+            continue  # sin cuello de botella
+
+        # Asignar todos los píxeles originales al componente erodado más cercano (Voronoi)
+        sub_regions = watershed(
+            np.ones((h, w), dtype=np.float32),
+            markers=componentes,
+            mask=mascara
+        )
+
+        sub_ids = [sid for sid in np.unique(sub_regions) if sid > 0]
+        sub_areas = sorted([(int(np.sum(sub_regions == sid)), sid) for sid in sub_ids], reverse=True)
+
+        # El componente más grande es el cuerpo, los demás son apéndices
+        for i, (_, sid) in enumerate(sub_areas[1:], start=1):
+            mascara_ap = (sub_regions == sid)
+            mapa_nuevo[mascara_ap] = nuevo_id
+
+            # Expandir el apéndice si no cabe un número
+            mascara_exp = (mapa_nuevo == nuevo_id)
+            for _ in range(tamano_fuente + 2):
+                if distance_transform_edt(mascara_exp).max() * 2 >= tamano_fuente:
+                    break
+                mascara_nueva = binary_dilation(mascara_exp, structure=estructura)
+                mascara_nueva &= (mapa_nuevo > 0)
+                mapa_nuevo[mascara_nueva] = nuevo_id
+                mascara_exp = mascara_nueva
+
+            all_info[nuevo_id] = {'color_id': row['color_id'], 'color_rgb': row['color_rgb']}
+            nuevo_id += 1
+
+    # Reconstruir df_regiones con areas actualizadas
+    nuevas_regiones = []
+    for region_id in np.unique(mapa_nuevo):
+        if region_id == 0 or region_id not in all_info:
+            continue
+        area = int(np.sum(mapa_nuevo == region_id))
+        nuevas_regiones.append({
+            'region_id': region_id,
+            'color_id': all_info[region_id]['color_id'],
+            'color_rgb': all_info[region_id]['color_rgb'],
+            'area_pixels': area,
+            'porcentaje': 100 * area / (h * w)
+        })
+
+    return mapa_nuevo, pd.DataFrame(nuevas_regiones)
 
 
 def expandir_regiones_para_caber_numero(mapa_regiones, df_regiones, tamano_fuente=10):
