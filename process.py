@@ -16,7 +16,8 @@ os.makedirs('output_pintar_numeros', exist_ok=True)
 #--------------------------------------------------------------
 # Paso 0: cargar imagen
 #--------------------------------------------------------------
-img_raw = f.cargar_imagen('img/pensamientos.jpg')
+img_raw = f.cargar_imagen('img/test3.jpeg')
+# img_raw = f.cargar_imagen('img/pensamientos.jpg')
 # img_raw = funciones.cargar_imagen(r"img/flores de lupino.png")
 h, w, c = img_raw.shape
 #--------------------------------------------------------------
@@ -26,7 +27,7 @@ h, w, c = img_raw.shape
 # Paso 1: reducir cantidad de colores
 #--------------------------------------------------------------
 
-img_cuantizada, paleta_img, labels, colores_paleta = f.cuantizar_imagen(img_raw, n_colores=16)
+img_cuantizada, paleta_img, labels, colores_paleta = f.cuantizar_imagen(img_raw, n_colores=24)
 
 #guardar resultado paso 1
 # Image.fromarray(img_cuantizada).save('output/paso2/filtrada_0.png')
@@ -69,7 +70,8 @@ img_regiones_filtrado = img_regiones_filtrado.reshape(h, w)
 
 img_regiones_filtradas = colores_paleta[img_regiones_filtrado - 1]
 
-Image.fromarray(img_regiones_filtradas).save('output/pensamientos_paso3.png')
+# Image.fromarray(img_regiones_filtradas).save('output/pensamientos_paso3.png')
+Image.fromarray(img_regiones_filtradas).save('output/test.png')
 
 
 #--------------------------------------------------------------
